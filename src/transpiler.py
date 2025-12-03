@@ -20,6 +20,62 @@ logger = get_logger(__name__)
 SKIP_KEYS = {"loc", "range", "start", "end", "tokens", "comments", "raw"}
 INDENT = "   "
 
+
+def print_angular_ast(angular_ast):
+    """Pretty print Angular AST after full transformation."""
+    print("\n================ ANGULAR AST ================\n")
+
+    cls = angular_ast.get("class", {})
+    tmpl = angular_ast.get("template", {})
+
+    # Component Name
+    print(f"Component: {cls.get('name')}\n")
+
+    # Properties
+    print("PROPERTIES:")
+    if cls.get("properties"):
+        for p in cls["properties"]:
+            name = p.get("name")
+            typ = p.get("type", "")
+            init = p.get("initial", "")
+            print(f"  - {name} ({typ}) = {init}")
+    else:
+        print("  (none)")
+    print()
+
+    # Methods
+    print("METHODS:")
+    if cls.get("methods"):
+        for m in cls["methods"]:
+            print(f"  {m['name']}({', '.join(m.get('parameters', []))}):")
+            print(f"    {m['body']}\n")
+    else:
+        print("  (none)")
+    print()
+
+    # Lifecycle Hooks
+    print("LIFECYCLE HOOKS:")
+    if cls.get("lifecycleHooks"):
+        for h in cls["lifecycleHooks"]:
+            print(f"  - {h['name']}")
+    else:
+        print("  (none)")
+    print()
+
+    # Template Elements
+    print("TEMPLATE ELEMENTS:")
+    elements = tmpl.get("elements", [])
+    if elements:
+        for el in elements:
+            tag = el.get("tag", "")
+            print(f"  - <{tag}>")
+    else:
+        print("  (none)")
+
+    print("\n============== END ANGULAR AST ==============\n")
+
+
+
 def print_ast_tree(node, indent=0):
     """Pretty-print only meaningful AST structure (clean, readable)."""
 
@@ -92,13 +148,14 @@ class Transpiler:
         ast = self.parser.parse(source_code)
         logger.debug("Successfully parsed React code")
 
-        print("\n=== AST STRUCTURE ===")
-        print_ast_tree(ast["body"])   # print only meaningful nodes
-        print("=== END AST STRUCTURE ===\n")
+       # print("\n=== AST STRUCTURE ===")
+       # print_ast_tree(ast["body"])   # print only meaningful nodes
+       # print("=== END AST STRUCTURE ===\n")
 
         # Transform AST
         angular_ast = self.transformer.transform(ast)
         logger.debug("Successfully transformed AST")
+        print_angular_ast(angular_ast)
 
         # Generate Angular code
         ensure_directory(output_dir)
