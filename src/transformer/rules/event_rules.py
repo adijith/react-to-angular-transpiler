@@ -2,7 +2,7 @@
 Rules for transforming React event handlers to Angular event bindings.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from ...utils.logger import get_logger
 
 logger = get_logger(__name__)

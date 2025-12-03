@@ -1,7 +1,7 @@
 """Parser module for parsing React code."""
 
 from .parser_interface import ParserInterface
-from .babel_parser import BabelParser
+from .jsx_parser import JSXParser
 
-__all__ = ["ParserInterface", "BabelParser"]
+__all__ = ["ParserInterface", "JSXParser"]
 

@@ -7,7 +7,7 @@
 Main transpiler class.
 
 **Parameters:**
-- `parser` (ParserInterface, optional): Parser instance. Defaults to BabelParser.
+- `parser` (ParserInterface, optional): Parser instance. Defaults to JsxParser.
 
 **Methods:**
 
@@ -30,7 +30,7 @@ Transpile a React component to Angular.
 
 ## Parser Classes
 
-### `BabelParser`
+### `JsxParser`
 
 Babel-based parser for React/JSX code.
 

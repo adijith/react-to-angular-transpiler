@@ -11,7 +11,7 @@ The React to Angular Transpiler is designed with a modular architecture that sep
 The parser module is responsible for parsing React/JSX code into an Abstract Syntax Tree (AST).
 
 - **ParserInterface**: Abstract interface defining the contract for parsers
-- **BabelParser**: Full-featured parser using Babel for accurate parsing
+- **JsxParser**: Full-featured parser using esprima for accurate parsing
 
 ### 2. Transformer Module (`src/transformer/`)
 

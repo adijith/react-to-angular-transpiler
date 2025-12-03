@@ -66,9 +66,9 @@ You can implement a custom parser by extending `ParserInterface`:
 
 ```python
 from src.transpiler import Transpiler
-from src.parser import ParserInterface, BabelParser
+from src.parser import ParserInterface, JsxParser
 
-# Use default BabelParser
+# Use default JsxParser
 transpiler = Transpiler()
 
 # Or use a custom parser

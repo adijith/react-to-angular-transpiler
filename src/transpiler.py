@@ -3,8 +3,9 @@ Main transpiler class that orchestrates the conversion process.
 """
 
 import os
+import json
 from typing import Optional
-from .parser import ParserInterface, BabelParser
+from .parser import ParserInterface, JSXParser
 from .transformer import ASTTransformer
 from .generator import TypeScriptGenerator, HTMLGenerator, CSSGenerator
 from .utils.logger import get_logger
@@ -12,6 +13,53 @@ from .utils.file_utils import read_file, write_file, ensure_directory
 
 logger = get_logger(__name__)
 
+# ---------------------------
+# Clean AST Pretty Printer
+# ---------------------------
+
+SKIP_KEYS = {"loc", "range", "start", "end", "tokens", "comments", "raw"}
+INDENT = "   "
+
+def print_ast_tree(node, indent=0):
+    """Pretty-print only meaningful AST structure (clean, readable)."""
+
+    # LIST → print each item
+    if isinstance(node, list):
+        for n in node:
+            print_ast_tree(n, indent)
+        return
+
+    # DICT → AST node
+    if isinstance(node, dict):
+
+        node_type = node.get("type")
+        if not node_type:
+            return
+
+        # labels for better readability
+        label = ""
+
+        if node_type == "Identifier":
+            label = f" ({node.get('name')})"
+
+        if node_type == "Literal":
+            label = f" ({node.get('value')})"
+
+        if node_type == "JSXIdentifier":
+            label = f" <{node.get('name')}>"
+
+        print(f"{INDENT * indent}- {node_type}{label}")
+
+        # Recurse into children nodes
+        for key, value in node.items():
+            if key in SKIP_KEYS or key == "type":
+                continue
+            print_ast_tree(value, indent + 1)
+
+
+# ---------------------------
+# Transpiler Class
+# ---------------------------
 
 class Transpiler:
     """Main transpiler class that converts React components to Angular."""
@@ -21,9 +69,9 @@ class Transpiler:
         Initialize the transpiler.
 
         Args:
-            parser: Parser instance to use. Defaults to BabelParser.
+            parser: Parser instance to use. Defaults to JSXParser.
         """
-        self.parser = parser or BabelParser()
+        self.parser = parser or JSXParser()
         self.transformer = ASTTransformer()
         self.ts_generator = TypeScriptGenerator()
         self.html_generator = HTMLGenerator()
@@ -32,13 +80,6 @@ class Transpiler:
     def transpile(self, input_path: str, output_dir: str) -> dict:
         """
         Transpile a React component to Angular.
-
-        Args:
-            input_path: Path to the React component file
-            output_dir: Directory to output Angular files
-
-        Returns:
-            Dictionary with paths to generated files
         """
         logger.info(f"Starting transpilation of {input_path}")
 
@@ -50,6 +91,10 @@ class Transpiler:
         # Parse React code
         ast = self.parser.parse(source_code)
         logger.debug("Successfully parsed React code")
+
+        print("\n=== AST STRUCTURE ===")
+        print_ast_tree(ast["body"])   # print only meaningful nodes
+        print("=== END AST STRUCTURE ===\n")
 
         # Transform AST
         angular_ast = self.transformer.transform(ast)
@@ -63,7 +108,7 @@ class Transpiler:
         html_code = self.html_generator.generate(angular_ast, component_name)
         css_code = self.css_generator.generate(angular_ast, component_name)
 
-        # Write output files
+        # Write output
         ts_path = os.path.join(output_dir, f"{component_name}.component.ts")
         html_path = os.path.join(output_dir, f"{component_name}.component.html")
         css_path = os.path.join(output_dir, f"{component_name}.component.css")
@@ -99,7 +144,7 @@ def main():
     transpiler = Transpiler()
     try:
         result = transpiler.transpile(args.input, args.output)
-        print(f"Successfully transpiled to:")
+        print("Successfully transpiled to:")
         for key, path in result.items():
             print(f"  {key}: {path}")
     except Exception as e:
@@ -109,4 +154,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

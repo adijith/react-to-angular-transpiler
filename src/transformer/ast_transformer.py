@@ -52,9 +52,11 @@ class ASTTransformer:
         }
 
         # Apply transformation rules
-        angular_ast = self.component_rules.transform(react_ast, angular_ast)
+        angular_ast = self.hooks_rules.transform(react_ast, angular_ast)
         angular_ast = self.jsx_rules.transform(react_ast, angular_ast)
         angular_ast = self.event_rules.transform(react_ast, angular_ast)
+        angular_ast = self.component_rules.transform(react_ast, angular_ast)
+
 
         logger.debug("Completed AST transformation")
         return angular_ast
