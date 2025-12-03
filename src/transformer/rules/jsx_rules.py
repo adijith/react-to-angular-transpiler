@@ -1,8 +1,14 @@
 """
 Rules for transforming JSX to Angular templates.
+
+- Converts the *root* JSX element (the one returned by the component) into
+  a single Angular AST element to avoid duplicates.
+- Properly converts array.map(...) whose arrow returns JSXElement into an
+  Element node with an `ngFor` dict attached.
+- Minimal prints for tracing.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from ...utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -12,203 +18,283 @@ class JSXRules:
     """Rules for JSX to Angular template transformations."""
 
     def transform(self, react_ast: Any, angular_ast: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Transform JSX elements to Angular template syntax.
+        print("[JSXRules] transform()")
+        # find the *root* JSX element (first JSXElement inside the return)
+        root_jsx = self._find_root_jsx(react_ast)
+        if not root_jsx:
+            print("[JSXRules] No root JSX found.")
+            return angular_ast
 
-        Args:
-            react_ast: React AST
-            angular_ast: Angular AST being built
-
-        Returns:
-            Updated Angular AST
-        """
-        logger.debug("Applying JSX transformation rules")
-
-        if "jsx_elements" in react_ast:
-            for jsx_element in react_ast["jsx_elements"]:
-                angular_element = self._transform_jsx_element(jsx_element, angular_ast)
-                angular_ast["template"]["elements"].append(angular_element)
-
+        converted = self._convert_jsx_to_angular(root_jsx)
+        if converted:
+            angular_ast["template"]["elements"].append(converted)
         return angular_ast
 
-    def _transform_jsx_element(self, jsx_element: Dict[str, Any], angular_ast: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform a single JSX element to Angular template element."""
-        tag = jsx_element.get("tag", "")
-        attributes = jsx_element.get("attributes", [])
-        children = jsx_element.get("children", "")
+    # ---------- helpers to find the root JSX element ----------
+    def _find_root_jsx(self, node: Any) -> Optional[Dict[str, Any]]:
+        """
+        Walk the AST and return the first JSXElement found inside a ReturnStatement
+        (or the first JSXElement if a return-specific one isn't found).
+        """
+        print("[JSXRules] _find_root_jsx()")
+        candidate = None
 
-        angular_attrs = []
-        ng_for_directive = None
-        two_way_binding = None
-        
-        for attr in attributes:
-            name = attr.get("name", "")
-            value = attr.get("value", "")
+        if isinstance(node, dict):
+            # Prefer JSX inside ReturnStatement.argument
+            if node.get("type") == "ReturnStatement":
+                arg = node.get("argument")
+                if isinstance(arg, dict) and arg.get("type") == "JSXElement":
+                    print("[JSXRules] Found JSX inside ReturnStatement.")
+                    return arg
 
-            # Map React attributes to Angular
-            if name == "className":
-                name = "class"
-            elif name == "key":
-                # Skip key attribute (Angular uses trackBy instead)
-                continue
-            elif name.startswith("on"):
-                # Event handlers are handled by EventRules
-                continue
-            elif name == "value":
-                # Check for two-way binding pattern (value + onChange)
-                # This will be handled by event_rules, but we mark it here
-                two_way_binding = value
-                continue
+            # search children
+            for v in node.values():
+                found = self._find_root_jsx(v)
+                if found:
+                    return found
 
-            angular_attrs.append({"name": name, "value": value})
+        elif isinstance(node, list):
+            for item in node:
+                found = self._find_root_jsx(item)
+                if found:
+                    return found
 
-        # Transform children - handle JSX expressions
-        transformed_children = self._transform_children(children, angular_ast)
-        
-        # Check if children contain .map() expression for *ngFor
-        if isinstance(children, str) and ".map(" in children:
-            ng_for_directive = self._extract_ngfor_from_map(children)
+        return candidate
 
-        element = {
+    # ---------- conversion (recursive) ----------
+    def _convert_jsx_to_angular(self, jsx_element: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        print("[JSXRules] _convert_jsx_to_angular()")
+        if not isinstance(jsx_element, dict):
+            return None
+
+        opening = jsx_element.get("openingElement", {})
+        children = jsx_element.get("children", [])
+
+        # tag
+        tag = ""
+        if isinstance(opening, dict):
+            name = opening.get("name", {})
+            if isinstance(name, dict):
+                tag = name.get("name", "")
+
+        # attributes
+        attrs_raw = opening.get("attributes", [])
+        attrs = self._convert_attributes(attrs_raw)
+
+        # convert children (list)
+        converted_children: List[Any] = []
+        if isinstance(children, list):
+            for child in children:
+                converted = self._convert_child(child)
+                # skip empty/None results
+                if converted not in (None, "", []):
+                    # If converted is an element and contains ngFor as directive-object,
+                    # keep it as an element; if it's a simple string keep string.
+                    converted_children.append(converted)
+
+        element: Dict[str, Any] = {
             "type": "Element",
-            "tag": tag,
-            "attributes": angular_attrs,
-            "children": transformed_children,
+            "tag": tag or "div",
+            "attributes": attrs,
+            "children": converted_children
         }
-        
-        if ng_for_directive:
-            element["ngFor"] = ng_for_directive
-        
-        if two_way_binding:
-            element["twoWayBinding"] = two_way_binding
 
         return element
 
-    def _transform_children(self, children: Any, angular_ast: Dict[str, Any]) -> str:
-        """Transform JSX children, handling expressions and interpolation."""
-        if not children:
-            return ""
-        
-        if isinstance(children, str):
-            # Transform JSX expressions: {variable} → {{variable}}
-            transformed = self._transform_jsx_expressions(children)
-            return transformed
-        elif isinstance(children, dict):
-            # Handle complex children structures
-            return self._transform_complex_children(children, angular_ast)
-        elif isinstance(children, list):
-            # Handle list of children
-            transformed_items = []
-            for child in children:
-                if isinstance(child, str):
-                    transformed_items.append(self._transform_jsx_expressions(child))
-                elif isinstance(child, dict):
-                    transformed_items.append(self._transform_complex_children(child, angular_ast))
-            return "".join(transformed_items)
-        
-        return str(children)
+    # ---------- attributes ----------
+    def _convert_attributes(self, attributes: List[Any]) -> List[Dict[str, Any]]:
+        print("[JSXRules] _convert_attributes()")
+        out: List[Dict[str, str]] = []
+        if not isinstance(attributes, list):
+            return out
 
-    def _transform_jsx_expressions(self, text: str) -> str:
-        """
-        Transform JSX expressions to Angular interpolation.
-        {variable} → {{variable}}
-        {todos.map(...)} → detect for *ngFor
-        """
-        import re
-        
-        # Pattern to match JSX expressions: {expression}
-        pattern = r'\{([^}]+)\}'
-        
-        def replace_expression(match):
-            expr = match.group(1).strip()
-            
-            # Check if it's a .map() call for *ngFor
-            if ".map(" in expr:
-                return f"<!-- ngFor: {expr} -->"
-            
-            # Simple variable interpolation
-            return f"{{{{{expr}}}}}"
-        
-        return re.sub(pattern, replace_expression, text)
+        for attr in attributes:
+            if not isinstance(attr, dict):
+                continue
 
-    def _extract_ngfor_from_map(self, map_expression: str) -> Dict[str, str]:
-        """
-        Extract *ngFor directive from .map() expression.
-        Example: todos.map((todo, index) => ...) → *ngFor="let todo of todos; let index = index"
-        """
-        import re
-        
-        # Pattern: arrayName.map((item, index) => ...)
-        pattern = r'(\w+)\.map\s*\(\s*\((\w+)(?:,\s*(\w+))?\)\s*=>'
-        match = re.search(pattern, map_expression)
-        
-        if match:
-            array_name = match.group(1)
-            item_name = match.group(2)
-            index_name = match.group(3) or "index"
-            
-            return {
-                "array": array_name,
-                "item": item_name,
-                "index": index_name,
-            }
-        
+            name_node = attr.get("name", {})
+            value_node = attr.get("value", {})
+
+            if not isinstance(name_node, dict):
+                continue
+
+            name = name_node.get("name", "")
+            value = self._extract_attribute_value(value_node)
+
+            # mappings
+            if name == "className":
+                name = "class"
+            if name == "key":
+                continue
+            if name.startswith("on"):
+                # event attributes handled by EventRules later
+                continue
+
+            out.append({"name": name, "value": value})
+
+        return out
+
+    def _extract_attribute_value(self, val: Any) -> str:
+        # basic extraction (literal or expression)
+        if isinstance(val, dict):
+            vtype = val.get("type")
+            if vtype == "Literal":
+                return str(val.get("value", ""))
+            if vtype == "JSXExpressionContainer":
+                expr = val.get("expression", {})
+                return self._expression_to_string(expr)
+        return ""
+
+    # ---------- children conversion ----------
+    def _convert_child(self, child: Any) -> Any:
+        print("[JSXRules] _convert_child()")
+        # text nodes can be dict (JSXText) or raw strings
+        if isinstance(child, str):
+            return child.strip()
+
+        if not isinstance(child, dict):
+            return None
+
+        ctype = child.get("type")
+
+        # text
+        if ctype == "JSXText":
+            return child.get("value", "").strip()
+
+        # expression container -> could be identifier interpolation or a .map() call
+        if ctype == "JSXExpressionContainer":
+            expr = child.get("expression", {})
+            if not isinstance(expr, dict):
+                return ""
+
+            # detect .map() call -> produce an element with ngFor
+            if expr.get("type") == "CallExpression":
+                callee = expr.get("callee", {})
+                # callee could be MemberExpression with property 'map'
+                if isinstance(callee, dict) and callee.get("type") == "MemberExpression":
+                    prop = callee.get("property", {})
+                    if isinstance(prop, dict) and prop.get("name") == "map":
+                        # transform map expression into ngFor-bearing element(s)
+                        ngfor_element = self._convert_map_expression_to_element(expr)
+                        return ngfor_element
+
+            # default: produce interpolation string
+            expr_str = self._expression_to_string(expr)
+            return f"{{{{ {expr_str} }}}}"
+
+        # nested JSX element
+        if ctype == "JSXElement":
+            return self._convert_jsx_to_angular(child)
+
         return None
 
-    def _transform_complex_children(self, child_node: Dict[str, Any], angular_ast: Dict[str, Any]) -> str:
-        """Transform complex child nodes (nested JSX elements)."""
-        if child_node.get("type") == "JSXExpressionContainer":
-            expression = child_node.get("expression", {})
-            return self._transform_expression(expression, angular_ast)
-        elif child_node.get("type") == "JSXElement":
-            return self._transform_jsx_element(child_node, angular_ast)
-        
-        return ""
-    
-    def _transform_expression(self, expression: Dict[str, Any], angular_ast: Dict[str, Any]) -> str:
-        """Transform JSX expression to Angular template expression."""
-        expr_type = expression.get("type", "")
-        
-        if expr_type == "CallExpression":
-            callee = expression.get("callee", {})
-            if callee.get("type") == "MemberExpression":
-                # Check for .map() call
-                if callee.get("property", {}).get("name") == "map":
-                    return self._transform_map_expression(expression, angular_ast)
-        
-        # Default: convert to interpolation
-        expr_str = self._expression_to_string(expression)
-        return f"{{{{{expr_str}}}}}"
-    
-    def _transform_map_expression(self, expression: Dict[str, Any], angular_ast: Dict[str, Any]) -> str:
-        """Transform .map() expression to *ngFor directive."""
-        callee = expression.get("callee", {})
-        object_name = callee.get("object", {}).get("name", "")
-        arguments = expression.get("arguments", [])
-        
-        if arguments:
-            arrow_func = arguments[0]
-            if arrow_func.get("type") == "ArrowFunctionExpression":
-                params = arrow_func.get("params", [])
-                item_name = params[0].get("name", "") if params else "item"
-                index_name = params[1].get("name", "") if len(params) > 1 else "index"
-                
-                return f"*ngFor=\"let {item_name} of {object_name}; let {index_name} = index\""
-        
-        return ""
-    
-    def _expression_to_string(self, expression: Dict[str, Any]) -> str:
-        """Convert expression AST node to string."""
-        expr_type = expression.get("type", "")
-        
-        if expr_type == "Identifier":
-            return expression.get("name", "")
-        elif expr_type == "Literal":
-            return repr(expression.get("value", ""))
-        elif expr_type == "MemberExpression":
-            object_name = self._expression_to_string(expression.get("object", {}))
-            property_name = self._expression_to_string(expression.get("property", {}))
-            return f"{object_name}.{property_name}"
-        
+    # ---------- expression to string ----------
+    def _expression_to_string(self, expr: Any) -> str:
+        if not isinstance(expr, dict):
+            return ""
+
+        etype = expr.get("type", "")
+
+        if etype == "Identifier":
+            return expr.get("name", "")
+
+        if etype == "Literal":
+            val = expr.get("value", "")
+            return str(val)
+
+        if etype == "MemberExpression":
+            # object.property or nested
+            obj = self._expression_to_string(expr.get("object"))
+            prop = self._expression_to_string(expr.get("property"))
+            if obj and prop:
+                return f"{obj}.{prop}"
+            return obj or prop
+
+        if etype == "CallExpression":
+            # produce callee(...) or detect simple callee
+            callee_node = expr.get("callee")
+            callee_str = self._expression_to_string(callee_node) if callee_node else ""
+            args = expr.get("arguments", [])
+            if args:
+                arg_strs = [self._expression_to_string(a) for a in args]
+                return f"{callee_str}({', '.join(arg_strs)})"
+            return callee_str
+
+        if etype == "ArrowFunctionExpression":
+            # e.g. (x) => x or (x, i) => <JSXElement>
+            params = expr.get("params", [])
+            pnames = [p.get("name", "") for p in params if isinstance(p, dict)]
+            return f"({', '.join(pnames)}) => ..."
+
         return ""
 
+    # ---------- convert map expression into an element with ngFor ----------
+    def _convert_map_expression_to_element(self, expr: Dict[str, Any]) -> Any:
+        """
+        Convert: todos.map((todo, index) => <li key={index}>{todo}</li>)
+        into an Element node with ngFor set on the li element.
+
+        Result example:
+        {
+            "type": "Element",
+            "tag": "li",
+            "attributes": [...],
+            "ngFor": {"array":"todos","item":"todo","index":"index"},
+            "children": ["{{ todo }}"]
+        }
+        """
+        print("[JSXRules] _convert_map_expression_to_element()")
+        if not isinstance(expr, dict):
+            return None
+
+        callee = expr.get("callee", {})
+        array_name = ""
+        if isinstance(callee, dict):
+            obj = callee.get("object", {})
+            if isinstance(obj, dict):
+                array_name = obj.get("name", "")
+
+        args = expr.get("arguments", [])
+        if not args:
+            return None
+
+        fn = args[0]
+        if not isinstance(fn, dict):
+            return None
+
+        # params / arrow function body
+        params = fn.get("params", [])
+        item_name = params[0].get("name", "item") if len(params) > 0 and isinstance(params[0], dict) else "item"
+        index_name = params[1].get("name", "index") if len(params) > 1 and isinstance(params[1], dict) else "index"
+
+        # arrow body may be a JSXElement or BlockStatement returning a JSXElement
+        body = fn.get("body")
+        jsx_body = None
+        if isinstance(body, dict) and body.get("type") == "JSXElement":
+            jsx_body = body
+        elif isinstance(body, dict) and body.get("type") == "BlockStatement":
+            # try find a ReturnStatement inside
+            for stmt in body.get("body", []):
+                if isinstance(stmt, dict) and stmt.get("type") == "ReturnStatement":
+                    candidate = stmt.get("argument")
+                    if isinstance(candidate, dict) and candidate.get("type") == "JSXElement":
+                        jsx_body = candidate
+                        break
+
+        if not jsx_body:
+            # fallback: produce generic li with interpolation of item
+            return {
+                "type": "Element",
+                "tag": "li",
+                "attributes": [],
+                "ngFor": {"array": array_name, "item": item_name, "index": index_name},
+                "children": [f"{{{{ {item_name} }}}}"]
+            }
+
+        # convert the jsx_body into element node
+        converted_inner = self._convert_jsx_to_angular(jsx_body)
+        # attach ngFor on the converted element
+        # if the converted element is not li, we still attach ngFor on it (same semantics)
+        converted_inner["ngFor"] = {"array": array_name, "item": item_name, "index": index_name}
+
+        return converted_inner
