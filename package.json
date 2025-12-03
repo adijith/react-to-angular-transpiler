@@ -1,0 +1,26 @@
+{
+  "name": "react-to-angular-transpiler",
+  "version": "1.0.0",
+  "description": "A tool for transpiling React components to Angular components",
+  "main": "index.js",
+  "scripts": {
+    "setup": "bash scripts/setup.sh"
+  },
+  "keywords": [
+    "react",
+    "angular",
+    "transpiler",
+    "migration"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0",
+    "@babel/types": "^7.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}
+

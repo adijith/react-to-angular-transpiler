@@ -1,0 +1,32 @@
+{
+  "lifecycle": {
+    "componentDidMount": "ngOnInit",
+    "componentDidUpdate": "ngAfterViewChecked",
+    "componentWillUnmount": "ngOnDestroy",
+    "componentDidCatch": "ngOnError"
+  },
+  "hooks": {
+    "useState": "property",
+    "useEffect": "ngOnInit/ngOnDestroy",
+    "useContext": "inject",
+    "useRef": "ViewChild/ElementRef",
+    "useMemo": "getter",
+    "useCallback": "method"
+  },
+  "events": {
+    "onClick": "click",
+    "onChange": "change",
+    "onSubmit": "submit",
+    "onFocus": "focus",
+    "onBlur": "blur",
+    "onKeyDown": "keydown",
+    "onKeyUp": "keyup",
+    "onMouseEnter": "mouseenter",
+    "onMouseLeave": "mouseleave"
+  },
+  "attributes": {
+    "className": "class",
+    "htmlFor": "for"
+  }
+}
+
