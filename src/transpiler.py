@@ -148,9 +148,9 @@ class Transpiler:
         ast = self.parser.parse(source_code)
         logger.debug("Successfully parsed React code")
 
-       # print("\n=== AST STRUCTURE ===")
-       # print_ast_tree(ast["body"])   # print only meaningful nodes
-       # print("=== END AST STRUCTURE ===\n")
+        print("\n=== AST STRUCTURE ===")
+        print_ast_tree(ast["body"])   # print only meaningful nodes
+        print("=== END AST STRUCTURE ===\n")
 
         # Transform AST
         angular_ast = self.transformer.transform(ast)
