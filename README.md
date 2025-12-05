@@ -1,8 +1,7 @@
 React → Angular Transpiler
 
 A lightweight transpiler that converts React Function Components into equivalent Angular Components.
-This project demonstrates AST parsing, transformation logic, and template generation—designed for interview evaluation.
-
+This project demonstrates AST parsing, transformation logic, and template generation.
 ⭐ Features
 
 Converts JSX → Angular template syntax
